@@ -1,0 +1,23 @@
+.react-pdf__Page__textContent.textLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1.0;
+}
+
+.react-pdf__Page__textContent.textLayer > span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  -webkit-transform-origin: 0% 0%;
+  transform-origin: 0% 0%;
+}
+
+.react-pdf__Page__textContent.textLayer ::selection {
+  background: rgb(0,0,255);
+}
