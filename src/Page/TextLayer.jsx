@@ -1,9 +1,9 @@
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
+import pdfjs from 'pdfjs-dist';
 
+import DocumentContext from '../DocumentContext';
 import PageContext from '../PageContext';
-
-import TextLayerItem from './TextLayerItem';
 
 import {
   callIfDefined,
@@ -16,25 +16,28 @@ import {
 import { isPage, isRotate } from '../shared/propTypes';
 
 export class TextLayerInternal extends PureComponent {
+
   state = {
-    textItems: null,
+    textContent: null,
   }
 
   componentDidMount() {
     const { page } = this.props;
 
     if (!page) {
-      throw new Error('Attempted to load page text content, but no page was specified.');
+      throw new Error('Attempted to load page textContent, but no page was specified.');
     }
 
-    this.loadTextItems();
+    this.loadTextContent();
   }
 
   componentDidUpdate(prevProps) {
     const { page } = this.props;
 
-    if (prevProps.page && (page !== prevProps.page)) {
-      this.loadTextItems();
+    if (
+      (prevProps.page && (page !== prevProps.page))
+    ) {
+      this.loadTextContent();
     }
   }
 
@@ -42,14 +45,14 @@ export class TextLayerInternal extends PureComponent {
     cancelRunningTask(this.runningTask);
   }
 
-  loadTextItems = async () => {
+  loadTextContent = async () => {
     const { page } = this.props;
 
     try {
       const cancellable = makeCancellable(page.getTextContent());
       this.runningTask = cancellable;
-      const { items: textItems } = await cancellable.promise;
-      this.setState({ textItems }, this.onLoadSuccess);
+      const textContent = await cancellable.promise;
+      this.setState({ textContent }, this.onLoadSuccess);
     } catch (error) {
       this.onLoadError(error);
     }
@@ -57,11 +60,11 @@ export class TextLayerInternal extends PureComponent {
 
   onLoadSuccess = () => {
     const { onGetTextSuccess } = this.props;
-    const { textItems } = this.state;
+    const { textContent } = this.state;
 
     callIfDefined(
       onGetTextSuccess,
-      textItems,
+      textContent,
     );
   }
 
@@ -70,7 +73,7 @@ export class TextLayerInternal extends PureComponent {
       return;
     }
 
-    this.setState({ textItems: false });
+    this.setState({ textContent: undefined });
 
     errorOnDev(error);
 
@@ -82,56 +85,70 @@ export class TextLayerInternal extends PureComponent {
     );
   }
 
-  get unrotatedViewport() {
-    const { page, scale } = this.props;
+  onRenderSuccess = () => {
+    const { onRenderTextLayerSuccess } = this.props;
 
-    return page.getViewport({ scale });
+    callIfDefined(onRenderTextLayerSuccess);
   }
 
   /**
-   * It might happen that the page is rotated by default. In such cases, we shouldn't rotate
-   * text content.
+   * Called when a text layer fails to render.
    */
-  get rotate() {
-    const { page, rotate } = this.props;
-    return rotate - page.rotate;
-  }
-
-  renderTextItems() {
-    const { textItems } = this.state;
-
-    if (!textItems) {
-      return null;
+  onRenderError = (error) => {
+    if (isCancelException(error)) {
+      return;
     }
 
-    return textItems.map((textItem, itemIndex) => (
-      <TextLayerItem
-        // eslint-disable-next-line react/no-array-index-key
-        key={itemIndex}
-        itemIndex={itemIndex}
-        {...textItem}
-      />
-    ));
+    errorOnDev(error);
+
+    const { onRenderTextLayerError } = this.props;
+
+    callIfDefined(
+      onRenderTextLayerError,
+      error,
+    );
+  }
+
+  get viewport() {
+    const { page, rotate, scale } = this.props;
+
+    return page.getViewport({ scale, rotation: rotate });
+  }
+
+  renderTextLayer() {
+    const { textContent } = this.state;
+
+    if (!textContent) {
+      return;
+    }
+
+    const { page } = this.props;
+    const viewport = this.viewport;
+
+    const parameters = {
+      textContent: textContent,
+      container: this.textLayer,
+      viewport: viewport,
+      enhanceTextSelection: false
+    };
+
+    this.textLayer.innerHTML = '';
+
+    try {
+      pdfjs.renderTextLayer(parameters);
+      this.onRenderSuccess();
+    } catch (error) {
+      this.onRenderError(error);
+    }
   }
 
   render() {
-    const { unrotatedViewport: viewport, rotate } = this;
-
     return (
       <div
-        className="react-pdf__Page__textContent"
-        style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          width: `${viewport.width}px`,
-          height: `${viewport.height}px`,
-          color: 'transparent',
-          transform: `translate(-50%, -50%) rotate(${rotate}deg)`,
-          pointerEvents: 'none',
-        }}
+        className="react-pdf__Page__textContent textLayer"
+        ref={(ref) => { this.textLayer = ref; }}
       >
-        {this.renderTextItems()}
+        {this.renderTextLayer()}
       </div>
     );
   }
@@ -140,15 +157,23 @@ export class TextLayerInternal extends PureComponent {
 TextLayerInternal.propTypes = {
   onGetTextError: PropTypes.func,
   onGetTextSuccess: PropTypes.func,
-  page: isPage.isRequired,
+  onRenderTextLayerError: PropTypes.func,
+  onRenderTextLayerSuccess: PropTypes.func,
+  page: isPage,
   rotate: isRotate,
   scale: PropTypes.number,
 };
 
 const TextLayer = props => (
-  <PageContext.Consumer>
-    {context => <TextLayerInternal {...context} {...props} />}
-  </PageContext.Consumer>
+  <DocumentContext.Consumer>
+    {documentContext => (
+      <PageContext.Consumer>
+        {pageContext => (
+          <TextLayerInternal {...documentContext} {...pageContext} {...props} />
+        )}
+      </PageContext.Consumer>
+    )}
+  </DocumentContext.Consumer>
 );
 
 export default TextLayer;
